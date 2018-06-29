@@ -30322,6 +30322,699 @@ cr.plugins_.Audio = function(runtime)
 
 }());
 
+// Slider bar
+// ECMAScript 5 strict mode
+
+;
+;
+
+/////////////////////////////////////
+// Plugin class
+cr.plugins_.sliderbar = function(runtime)
+{
+	this.runtime = runtime;
+};
+
+(function ()
+{
+	/////////////////////////////////////
+	var pluginProto = cr.plugins_.sliderbar.prototype;
+		
+	/////////////////////////////////////
+	// Object type class
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+
+	var typeProto = pluginProto.Type.prototype;
+
+	// called on startup for each object type
+	typeProto.onCreate = function()
+	{
+	};
+
+	/////////////////////////////////////
+	// Instance class
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	
+	var instanceProto = pluginProto.Instance.prototype;
+
+	// called whenever an instance is created
+	instanceProto.onCreate = function()
+	{
+		this.elem = document.createElement("input");
+		this.elem.type = "range";
+		
+		this.elem["max"] = this.properties[2];
+		this.elem["min"] = this.properties[1];
+		this.elem["step"] = this.properties[3];
+		this.elem["value"] = this.properties[0];
+		
+		this.elem.disabled = !this.properties[6];
+		this.elem.id = this.properties[7];
+		this.elem.title = this.properties[4];
+		document.body.appendChild(this.elem);
+		
+		this.element_hidden = false;
+		
+		if (!this.properties[5])			// initially invisible
+		{
+			this.elem.style.display = "none";
+			this.visible = false;
+			this.element_hidden = true;
+		}
+		
+		this.elem.onclick = (function (self) {
+			return function(e) {
+				e.stopPropagation();
+				
+				self.runtime.isInUserInputEvent = true;
+				self.runtime.trigger(cr.plugins_.sliderbar.prototype.cnds.OnClicked, self);
+				self.runtime.isInUserInputEvent = false;
+			};
+		})(this);
+		
+		this.elem.onchange = (function (self) {
+			return function(e) {
+				self.runtime.isInUserInputEvent = true;
+				self.runtime.trigger(cr.plugins_.sliderbar.prototype.cnds.OnChanged, self);
+				self.runtime.isInUserInputEvent = false;
+			};
+		})(this);
+		
+		// Prevent touches reaching the canvas
+		this.elem.addEventListener("touchstart", function (e) {
+			e.stopPropagation();
+		}, false);
+		
+		this.elem.addEventListener("touchmove", function (e) {
+			e.stopPropagation();
+		}, false);
+		
+		this.elem.addEventListener("touchend", function (e) {
+			e.stopPropagation();
+		}, false);
+		
+		// Prevent clicks being blocked
+		this.elem.addEventListener("mousedown", function (e) {
+			e.stopPropagation();
+		});
+		
+		this.elem.addEventListener("mouseup", function (e) {
+			e.stopPropagation();
+		});
+		
+		// Prevent key presses being blocked by the Keyboard object
+		this.elem.addEventListener("keydown", function (e) {
+			e.stopPropagation();
+		});
+		
+		this.elem.addEventListener("keyup", function (e) {
+			e.stopPropagation();
+		});
+		
+		this.lastLeft = 0;
+		this.lastTop = 0;
+		this.lastRight = 0;
+		this.lastBottom = 0;
+		this.lastWinWidth = 0;
+		this.lastWinHeight = 0;
+			
+		this.updatePosition(true);
+		
+		this.runtime.tickMe(this);
+	};
+	
+	instanceProto.saveToJSON = function ()
+	{
+		var o = {
+			"v": this.elem["value"],
+			"mi": this.elem["min"],
+			"ma": this.elem["max"],
+			"s": this.elem["step"]
+		};
+		
+		return o;
+	};
+	
+	instanceProto.loadFromJSON = function (o)
+	{
+		this.elem["min"] = o["mi"];
+		this.elem["max"] = o["ma"];
+		this.elem["step"] = o["s"];
+		this.elem["value"] = o["v"];
+	};
+	
+	instanceProto.onDestroy = function ()
+	{
+		this.elem.parentElement.removeChild(this.elem);
+		this.elem = null;
+	};
+	
+	instanceProto.tick = function ()
+	{
+		this.updatePosition();
+	};
+	
+	var last_canvas_offset = null;
+	var last_checked_tick = -1;
+	
+	instanceProto.updatePosition = function (first)
+	{
+		var left = this.layer.layerToCanvas(this.x, this.y, true);
+		var top = this.layer.layerToCanvas(this.x, this.y, false);
+		var right = this.layer.layerToCanvas(this.x + this.width, this.y + this.height, true);
+		var bottom = this.layer.layerToCanvas(this.x + this.width, this.y + this.height, false);
+		
+		var rightEdge = this.runtime.width / this.runtime.devicePixelRatio;
+		var bottomEdge = this.runtime.height / this.runtime.devicePixelRatio;
+		
+		// Is entirely offscreen or invisible: hide
+		if (!this.visible || !this.layer.visible || right <= 0 || bottom <= 0 || left >= rightEdge || top >= bottomEdge)
+		{
+			if (!this.element_hidden)
+				this.elem.style.display = "none";
+			
+			this.element_hidden = true;
+			return;
+		}
+		
+		// Truncate to canvas size
+		if (left < 1)
+			left = 1;
+		if (top < 1)
+			top = 1;
+		if (right >= rightEdge)
+			right = rightEdge - 1;
+		if (bottom >= bottomEdge)
+			bottom = bottomEdge - 1;
+		
+		var curWinWidth = window.innerWidth;
+		var curWinHeight = window.innerHeight;
+			
+		// Avoid redundant updates
+		if (!first && this.lastLeft === left && this.lastTop === top && this.lastRight === right && this.lastBottom === bottom && this.lastWinWidth === curWinWidth && this.lastWinHeight === curWinHeight)
+		{
+			if (this.element_hidden)
+			{
+				this.elem.style.display = "";
+				this.element_hidden = false;
+			}
+			
+			return;
+		}
+			
+		this.lastLeft = left;
+		this.lastTop = top;
+		this.lastRight = right;
+		this.lastBottom = bottom;
+		this.lastWinWidth = curWinWidth;
+		this.lastWinHeight = curWinHeight;
+		
+		if (this.element_hidden)
+		{
+			this.elem.style.display = "";
+			this.element_hidden = false;
+		}
+		
+		var offx = Math.round(left) + this.runtime.canvas.offsetLeft;
+		var offy = Math.round(top) + this.runtime.canvas.offsetTop;
+		this.elem.style.position = "absolute";
+		this.elem.style.left = offx + "px";
+		this.elem.style.top = offy + "px";
+		this.elem.style.width = Math.round(right - left) + "px";
+		this.elem.style.height = Math.round(bottom - top) + "px";
+	};
+	
+	// only called if a layout object
+	instanceProto.draw = function(ctx)
+	{
+	};
+	
+	instanceProto.drawGL = function(glw)
+	{
+	};
+	
+
+	//////////////////////////////////////
+	// Conditions
+	function Cnds() {};
+	
+	Cnds.prototype.OnClicked = function ()
+	{
+		return true;
+	};
+	
+	Cnds.prototype.OnChanged = function ()
+	{
+		return true;
+	};
+	
+	Cnds.prototype.CompareValue = function (cmp, x)
+	{
+		return cr.do_cmp(parseFloat(this.elem["value"]), cmp, x);
+	};
+	
+	pluginProto.cnds = new Cnds();
+	
+	//////////////////////////////////////
+	// Actions
+	function Acts() {};
+
+	Acts.prototype.SetTooltip = function (text)
+	{
+		this.elem.title = text;
+	};
+	
+	Acts.prototype.SetVisible = function (vis)
+	{
+		this.visible = (vis !== 0);
+	};
+	
+	Acts.prototype.SetCSSStyle = function (p, v)
+	{
+		this.elem.style[cr.cssToCamelCase(p)] = v;
+	};
+	
+	Acts.prototype.SetValue = function (x)
+	{
+		this.elem["value"] = x;
+	};
+	
+	Acts.prototype.SetMaximum = function (x)
+	{
+		this.elem["max"] = x;
+	};
+	
+	Acts.prototype.SetMinimum = function (x)
+	{
+		this.elem["min"] = x;
+	};
+	
+	Acts.prototype.SetStep = function (x)
+	{
+		this.elem["step"] = x;
+	};
+	
+	Acts.prototype.SetEnabled = function (en)
+	{
+		this.elem.disabled = (en === 0);
+	};
+	
+	pluginProto.acts = new Acts();
+	
+	//////////////////////////////////////
+	// Expressions
+	function Exps() {};
+	
+	Exps.prototype.Value = function (ret)
+	{
+		ret.set_float(parseFloat(this.elem["value"]) || 0);
+	};
+	
+	Exps.prototype.Maximum = function (ret)
+	{
+		ret.set_float(parseFloat(this.elem["max"]) || 0);
+	};
+	
+	Exps.prototype.Minimum = function (ret)
+	{
+		ret.set_float(parseFloat(this.elem["min"]) || 0);
+	};
+	
+	Exps.prototype.Step = function (ret)
+	{
+		ret.set_float(parseFloat(this.elem["step"]) || 0);
+	};
+	
+	pluginProto.exps = new Exps();
+
+}());
+
+// Button
+// ECMAScript 5 strict mode
+
+;
+;
+
+/////////////////////////////////////
+// Plugin class
+cr.plugins_.Button = function(runtime)
+{
+	this.runtime = runtime;
+};
+
+(function ()
+{
+	/////////////////////////////////////
+	var pluginProto = cr.plugins_.Button.prototype;
+		
+	/////////////////////////////////////
+	// Object type class
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+
+	var typeProto = pluginProto.Type.prototype;
+
+	// called on startup for each object type
+	typeProto.onCreate = function()
+	{
+	};
+
+	/////////////////////////////////////
+	// Instance class
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	
+	var instanceProto = pluginProto.Instance.prototype;
+
+	// called whenever an instance is created
+	instanceProto.onCreate = function()
+	{
+		this.isCheckbox = (this.properties[0] === 1);
+		
+		this.inputElem = document.createElement("input");
+		
+		if (this.isCheckbox)
+			this.elem = document.createElement("label");
+		else
+			this.elem = this.inputElem;
+			
+		this.labelText = null;
+		
+		this.inputElem.type = (this.isCheckbox ? "checkbox" : "button");
+		this.inputElem.id = this.properties[7];
+		document.body.appendChild(this.elem);
+		
+		if (this.isCheckbox)
+		{
+			this.elem.appendChild(this.inputElem);
+			this.labelText = document.createTextNode(this.properties[1]);
+			this.elem.appendChild(this.labelText);
+			
+			this.inputElem.checked = this.properties[6];
+			
+			// Avoid yucky serif font for checkbox labels
+			this.elem.style.fontFamily = "sans-serif";
+			
+			// Allow setting width and height on label
+			this.elem.style.display = "inline-block";
+			this.elem.style.color = "black";
+		}
+		else
+			this.inputElem.value = this.properties[1];
+		
+		this.elem.title = this.properties[2];
+		this.inputElem.disabled = !this.properties[4];
+		
+		this.autoFontSize = this.properties[5];
+		this.element_hidden = false;
+		
+		if (!this.properties[3])		// initially invisible
+		{
+			this.elem.style.display = "none";
+			this.visible = false;
+			this.element_hidden = true;
+		}
+		
+		this.inputElem.onclick = (function (self) {
+			return function(e) {
+				e.stopPropagation();
+				
+				self.runtime.isInUserInputEvent = true;
+				self.runtime.trigger(cr.plugins_.Button.prototype.cnds.OnClicked, self);
+				self.runtime.isInUserInputEvent = false;
+			};
+		})(this);
+		
+		// Prevent touches reaching the canvas
+		this.elem.addEventListener("touchstart", function (e) {
+			e.stopPropagation();
+		}, false);
+		
+		this.elem.addEventListener("touchmove", function (e) {
+			e.stopPropagation();
+		}, false);
+		
+		this.elem.addEventListener("touchend", function (e) {
+			e.stopPropagation();
+		}, false);
+		
+		// Prevent clicks being blocked
+		this.elem.addEventListener("mousedown", function (e) {
+			e.stopPropagation();
+		});
+		
+		this.elem.addEventListener("mouseup", function (e) {
+			e.stopPropagation();
+		});
+		
+		// Prevent key presses being blocked by the Keyboard object
+		this.elem.addEventListener("keydown", function (e) {
+			e.stopPropagation();
+		});
+		
+		this.elem.addEventListener("keyup", function (e) {
+			e.stopPropagation();
+		});
+		
+		this.lastLeft = 0;
+		this.lastTop = 0;
+		this.lastRight = 0;
+		this.lastBottom = 0;
+		this.lastWinWidth = 0;
+		this.lastWinHeight = 0;
+			
+		this.updatePosition(true);
+		
+		this.runtime.tickMe(this);
+	};
+	
+	instanceProto.saveToJSON = function ()
+	{
+		var o = {
+			"tooltip": this.elem.title,
+			"disabled": !!this.inputElem.disabled
+		};
+			
+		if (this.isCheckbox)
+		{
+			o["checked"] = !!this.inputElem.checked;
+			o["text"] = this.labelText.nodeValue;
+		}
+		else
+		{
+			o["text"] = this.elem.value;
+		}
+		
+		return o;
+	};
+	
+	instanceProto.loadFromJSON = function (o)
+	{
+		this.elem.title = o["tooltip"];
+		this.inputElem.disabled = o["disabled"];
+		
+		if (this.isCheckbox)
+		{
+			this.inputElem.checked = o["checked"];
+			this.labelText.nodeValue = o["text"];
+		}
+		else
+		{
+			this.elem.value = o["text"];
+		}
+	};
+	
+	instanceProto.onDestroy = function ()
+	{
+		this.elem.parentElement.removeChild(this.elem);
+		this.elem = null;
+	};
+	
+	instanceProto.tick = function ()
+	{
+		this.updatePosition();
+	};
+	
+	var last_canvas_offset = null;
+	var last_checked_tick = -1;
+	
+	instanceProto.updatePosition = function (first)
+	{
+		var left = this.layer.layerToCanvas(this.x, this.y, true);
+		var top = this.layer.layerToCanvas(this.x, this.y, false);
+		var right = this.layer.layerToCanvas(this.x + this.width, this.y + this.height, true);
+		var bottom = this.layer.layerToCanvas(this.x + this.width, this.y + this.height, false);
+		
+		var rightEdge = this.runtime.width / this.runtime.devicePixelRatio;
+		var bottomEdge = this.runtime.height / this.runtime.devicePixelRatio;
+		
+		// Is entirely offscreen or invisible: hide
+		if (!this.visible || !this.layer.visible || right <= 0 || bottom <= 0 || left >= rightEdge || top >= bottomEdge)
+		{
+			if (!this.element_hidden)
+				this.elem.style.display = "none";
+			
+			this.element_hidden = true;
+			return;
+		}
+		
+		// Truncate to canvas size
+		if (left < 1)
+			left = 1;
+		if (top < 1)
+			top = 1;
+		if (right >= rightEdge)
+			right = rightEdge - 1;
+		if (bottom >= bottomEdge)
+			bottom = bottomEdge - 1;
+		
+		var curWinWidth = window.innerWidth;
+		var curWinHeight = window.innerHeight;
+			
+		// Avoid redundant updates
+		if (!first && this.lastLeft === left && this.lastTop === top && this.lastRight === right && this.lastBottom === bottom && this.lastWinWidth === curWinWidth && this.lastWinHeight === curWinHeight)
+		{
+			if (this.element_hidden)
+			{
+				this.elem.style.display = "";
+				this.element_hidden = false;
+			}
+			
+			return;
+		}
+			
+		this.lastLeft = left;
+		this.lastTop = top;
+		this.lastRight = right;
+		this.lastBottom = bottom;
+		this.lastWinWidth = curWinWidth;
+		this.lastWinHeight = curWinHeight;
+		
+		if (this.element_hidden)
+		{
+			this.elem.style.display = "";
+			this.element_hidden = false;
+		}
+		
+		var offx = Math.round(left) + this.runtime.canvas.offsetLeft;
+		var offy = Math.round(top) + this.runtime.canvas.offsetTop;
+		this.elem.style.position = "absolute";
+		this.elem.style.left = offx + "px";
+		this.elem.style.top = offy + "px";
+		this.elem.style.width = Math.round(right - left) + "px";
+		this.elem.style.height = Math.round(bottom - top) + "px";
+		
+		if (this.autoFontSize)
+			this.elem.style.fontSize = ((this.layer.getScale(true) / this.runtime.devicePixelRatio) - 0.2) + "em";
+	};
+	
+	// only called if a layout object
+	instanceProto.draw = function(ctx)
+	{
+	};
+	
+	instanceProto.drawGL = function(glw)
+	{
+	};
+	
+
+	//////////////////////////////////////
+	// Conditions
+	function Cnds() {};
+	
+	Cnds.prototype.OnClicked = function ()
+	{
+		return true;
+	};
+	
+	Cnds.prototype.IsChecked = function ()
+	{
+		return this.isCheckbox && this.inputElem.checked;
+	};
+	
+	pluginProto.cnds = new Cnds();
+	
+	//////////////////////////////////////
+	// Actions
+	function Acts() {};
+
+	Acts.prototype.SetText = function (text)
+	{
+		if (this.isCheckbox)
+			this.labelText.nodeValue = text;
+		else
+			this.elem.value = text;
+	};
+	
+	Acts.prototype.SetTooltip = function (text)
+	{
+		this.elem.title = text;
+	};
+	
+	Acts.prototype.SetVisible = function (vis)
+	{
+		this.visible = (vis !== 0);
+	};
+	
+	Acts.prototype.SetEnabled = function (en)
+	{
+		this.inputElem.disabled = (en === 0);
+	};
+	
+	Acts.prototype.SetFocus = function ()
+	{
+		this.inputElem.focus();
+	};
+	
+	Acts.prototype.SetBlur = function ()
+	{
+		this.inputElem.blur();
+	};
+	
+	Acts.prototype.SetCSSStyle = function (p, v)
+	{
+		this.elem.style[cr.cssToCamelCase(p)] = v;
+	};
+	
+	Acts.prototype.SetChecked = function (c)
+	{
+		if (!this.isCheckbox)
+			return;
+			
+		this.inputElem.checked = (c === 1);
+	};
+	
+	Acts.prototype.ToggleChecked = function ()
+	{
+		if (!this.isCheckbox)
+			return;
+			
+		this.inputElem.checked = !this.inputElem.checked;
+	};
+	
+	pluginProto.acts = new Acts();
+	
+	//////////////////////////////////////
+	// Expressions
+	function Exps() {};
+	pluginProto.exps = new Exps();
+
+}());
+
 // Bullet
 // ECMAScript 5 strict mode
 
@@ -32148,6 +32841,1901 @@ cr.behaviors.Platform = function(runtime)
 	
 }());
 
+// Destroy outside layout
+// ECMAScript 5 strict mode
+
+;
+;
+
+/////////////////////////////////////
+// Behavior class
+cr.behaviors.destroy = function(runtime)
+{
+	this.runtime = runtime;
+};
+
+(function ()
+{
+	var behaviorProto = cr.behaviors.destroy.prototype;
+		
+	/////////////////////////////////////
+	// Behavior type class
+	behaviorProto.Type = function(behavior, objtype)
+	{
+		this.behavior = behavior;
+		this.objtype = objtype;
+		this.runtime = behavior.runtime;
+	};
+
+	var behtypeProto = behaviorProto.Type.prototype;
+
+	behtypeProto.onCreate = function()
+	{
+	};
+
+	/////////////////////////////////////
+	// Behavior instance class
+	behaviorProto.Instance = function(type, inst)
+	{
+		this.type = type;
+		this.behavior = type.behavior;
+		this.inst = inst;				// associated object instance to modify
+		this.runtime = type.runtime;
+	};
+	
+	var behinstProto = behaviorProto.Instance.prototype;
+
+	behinstProto.onCreate = function()
+	{
+	};
+
+	behinstProto.tick = function ()
+	{
+		// Destroy attached object if it has left the layout
+		this.inst.update_bbox();
+		var bbox = this.inst.bbox;
+		var layout = this.inst.layer.layout;
+		
+		if (bbox.right < 0 || bbox.bottom < 0 || bbox.left > layout.width || bbox.top > layout.height)
+			this.runtime.DestroyInstance(this.inst);
+	};
+	
+}());
+
+// Physics
+// ECMAScript 5 strict mode
+
+var Box2D = window["Box2DFn"]();
+var b2Vec2 = Box2D["b2Vec2"];
+
+// from helper script for creating collision polygons
+function createPolygonShape(vertices)
+{
+	var shape = new Box2D["b2PolygonShape"]();
+	var buffer = Box2D["_malloc"](vertices.length * 8);
+	var offset = 0;
+	for (var i = 0; i < vertices.length; i++)
+	{
+		Box2D["HEAPF32"][buffer + offset >> 2] = vertices[i]["get_x"]();
+		Box2D["HEAPF32"][buffer + (offset + 4) >> 2] = vertices[i]["get_y"]();
+		offset += 8;
+	}
+	var ptr_wrapped = Box2D["wrapPointer"](buffer, Box2D["b2Vec2"]);
+	shape["Set"](ptr_wrapped, vertices.length);
+	Box2D["_free"](buffer);
+	return shape;
+}
+
+// Recycler for b2Vec2s
+b2Vec2._freeCache = [];
+
+b2Vec2.Get = function (x, y)
+{
+	var ret;
+	
+	if (b2Vec2._freeCache.length)
+	{
+		ret = b2Vec2._freeCache.pop();
+		ret["set_x"](x);
+		ret["set_y"](y);
+		return ret;
+	}
+	else
+	{
+		return new b2Vec2(x, y);
+	}
+};
+
+b2Vec2.Free = function (v)
+{
+	b2Vec2._freeCache.push(v);
+};
+
+b2Vec2.Clone = function (v)
+{
+	return b2Vec2.Get(v["get_x"](), v["get_y"]());
+};
+
+// For where vec2s are only needed temporarily and we don't want to make garbage
+var tmpvec2a = b2Vec2.Get(0, 0);
+var tmpvec2b = b2Vec2.Get(0, 0);
+
+function getTempVec2a(x, y)
+{
+	tmpvec2a["set_x"](x);
+	tmpvec2a["set_y"](y);
+	return tmpvec2a;
+};
+
+function getTempVec2b(x, y)
+{
+	tmpvec2b["set_x"](x);
+	tmpvec2b["set_y"](y);
+	return tmpvec2b;
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+// b2Separator
+// Translated from code written by Antoan Angelov
+// http://www.emanueleferonato.com/2011/09/12/create-non-convex-complex-shapes-with-box2d/
+// Original license:
+/*
+* Convex Separator for Box2D Flash
+*
+* This class has been written by Antoan Angelov. 
+* It is designed to work with Erin Catto's Box2D physics library.
+*
+* Everybody can use this software for any purpose, under two restrictions:
+* 1. You cannot claim that you wrote this software.
+* 2. You can not remove or alter this notice.
+*
+*/
+// Translation from ActionScript to Javascript by Ashley Gullen
+cr.b2Separator = function() {};
+
+cr.b2Separator.det = function(x1, y1, x2, y2, x3, y3)
+{
+	return x1*y2 + x2*y3 + x3*y1 - y1*x2 - y2*x3 - y3*x1;
+};
+
+cr.b2Separator.hitRay = function(x1, y1, x2, y2, x3, y3, x4, y4)
+{
+	var t1 = x3-x1, t2 = y3-y1, t3 = x2-x1, t4 = y2-y1, t5 = x4-x3, t6 = y4-y3, t7 = t4*t5 - t3*t6;
+	var a = (t5*t2 - t6*t1) / t7;
+	var px = x1 + a*t3, py = y1 + a*t4;
+	var b1 = cr.b2Separator.isOnSegment(x2, y2, x1, y1, px, py);
+	var b2 = cr.b2Separator.isOnSegment(px, py, x3, y3, x4, y4);
+
+	if (b1 && b2)
+		return b2Vec2.Get(px, py);
+	else
+		return null;
+};
+
+cr.b2Separator.isOnSegment = function(px, py, x1, y1, x2, y2)
+{
+	var b1 = (x1+0.1 >= px && px >= x2-0.1) || (x1-0.1 <= px && px <= x2+0.1);
+	var b2 = (y1+0.1 >= py && py >= y2-0.1) || (y1-0.1 <= py && py <= y2+0.1);
+	return (b1 && b2) && cr.b2Separator.isOnLine(px, py, x1, y1, x2, y2);
+};
+
+cr.b2Separator.isOnLine = function(px, py, x1, y1, x2, y2)
+{
+	if (Math.abs(x2-x1) > 0.1)
+	{
+		var a = (y2-y1) / (x2-x1);
+		var possibleY = a * (px-x1)+y1;
+		var diff = Math.abs(possibleY-py);
+		return diff < 0.1;
+	}
+
+	return Math.abs(px-x1) < 0.1;
+};
+
+cr.b2Separator.pointsMatch = function(x1, y1, x2, y2)
+{
+	return Math.abs(x2-x1) < 0.1 && Math.abs(y2-y1) < 0.1;
+};
+
+cr.b2Separator.Separate = function(verticesVec /*array of b2Vec2*/, objarea)
+{
+	var calced = cr.b2Separator.calcShapes(verticesVec);
+	
+	// deep copy output
+	var ret = [];
+	var poly, a, b, c;
+	var i, len, j, lenj;
+	var areasum;
+	
+	for (i = 0, len = calced.length; i < len; i++)
+	{
+		a = calced[i];
+		poly = [];
+		poly.length = a.length;
+		areasum = 0;
+		
+		for (j = 0, lenj = a.length; j < lenj; j++)
+		{
+			b = a[j];
+			c = a[(j + 1) % lenj];
+			
+			// calculating area
+			areasum += (b["get_x"]() * c["get_y"]() - b["get_y"]() * c["get_x"]());
+			
+			// copy vertex
+			poly[j] = b2Vec2.Get(b["get_x"](), b["get_y"]());
+		}
+		
+		areasum = Math.abs(areasum / 2);
+		
+		// The separation algorithm seems to generate tiny polygons as artefacts.
+		// I've no idea why (TODO: find out why).  As a hack, any polygons
+		// with an area less than 0.1% the total object area are discarded!
+		// (This used to be 1.5%, but complex polys on large objects would incorrectly
+		// get filtered.)
+		if (areasum >= objarea * 0.001)
+			ret.push(poly);
+		else
+		{
+			for (j = 0, lenj = poly.length; j < lenj; j++)
+				b2Vec2.Free(poly[j]);
+		}
+	}
+	
+	// Since box2d has a limit on 8 points for a convex poly, split any polys with more points in to multiple polys.
+	ret = SplitConvexPolysOver8Points(ret);
+	
+;
+	return ret;
+};
+
+cr.b2Separator.calcShapes = function(verticesVec /*array of b2Vec2*/)
+{
+	var vec = [];										// array of b2Vec2
+	var i = 0, n = 0, j = 0;							// ints
+	var d = 0, t = 0, dx = 0, dy = 0, minLen = 0;		// numbers
+	var i1 = 0, i2 = 0, i3 = 0;							// ints
+	var p1, p2, p3, v1, v2, v, hitV;					// b2Vec2s
+	var j1 = 0, j2 = 0, k = 0, h = 0;					// ints
+	var vec1 = [], vec2 = [];							// array of b2Vec2
+	var isConvex = false;								// boolean
+	var figsVec = [], queue = [];						// Arrays
+	var pushed = false;
+
+	queue.push(verticesVec);
+
+	while (queue.length)
+	{
+		vec = queue[0];
+		n = vec.length;
+		isConvex = true;
+
+		for (i = 0; i < n; i++)
+		{
+			i1 = i;
+			i2 = (i < n-1) ? i+1 : i+1-n;
+			i3 = (i < n-2) ? i+2 : i+2-n;
+
+			p1 = vec[i1];
+			p2 = vec[i2];
+			p3 = vec[i3];
+
+			d = cr.b2Separator.det(p1["get_x"](), p1["get_y"](), p2["get_x"](), p2["get_y"](), p3["get_x"](), p3["get_y"]());
+			
+			if (d < 0)
+			{
+				isConvex = false;
+				minLen = 1e9;
+
+				for (j = 0; j < n; j++)
+				{
+					if ((j !== i1) && (j !== i2))
+					{
+						j1 = j;
+						j2 = (j<n - 1) ? j+1 : 0;
+
+						v1 = vec[j1];
+						v2 = vec[j2];
+
+						v = cr.b2Separator.hitRay(p1["get_x"](), p1["get_y"](), p2["get_x"](), p2["get_y"](), v1["get_x"](), v1["get_y"](), v2["get_x"](), v2["get_y"]());
+
+						if (v)
+						{
+							dx = p2["get_x"]() - v["get_x"]();
+							dy = p2["get_y"]() - v["get_y"]();
+							t = dx*dx + dy*dy;
+
+							if (t < minLen)
+							{
+								h = j1;
+								k = j2;
+								hitV = v;
+								minLen = t;
+							}
+							else
+								b2Vec2.Free(v);
+						}
+					}
+				}
+
+				// invalid poly
+				if (minLen === 1e9)
+					return [];
+
+				vec1 = [];
+				vec2 = [];
+
+				j1 = h;
+				j2 = k;
+				v1 = vec[j1];
+				v2 = vec[j2];
+
+				pushed = false;
+				
+				if (!cr.b2Separator.pointsMatch(hitV["get_x"](), hitV["get_y"](), v2["get_x"](), v2["get_y"]()))
+				{
+					vec1.push(hitV);
+					pushed = true;
+				}
+					
+				if (!cr.b2Separator.pointsMatch(hitV["get_x"](), hitV["get_y"](), v1["get_x"](), v1["get_y"]()))
+				{
+					vec2.push(hitV);
+					pushed = true;
+				}
+				
+				// Last use of hitV - release if no longer used
+				if (!pushed)
+					b2Vec2.Free(hitV);
+
+				h = -1;
+				k = i1;
+				
+				while (true)
+				{
+					if (k !== j2)
+						vec1.push(vec[k]);
+					else
+					{
+						// invalid poly
+						if (h < 0 || h >= n)
+							return [];
+							
+						if (!cr.b2Separator.isOnSegment(v2["get_x"](), v2["get_y"](), vec[h]["get_x"](), vec[h]["get_y"](), p1["get_x"](), p1["get_y"]()))
+							vec1.push(vec[k]);
+							
+						break;
+					}
+
+					h = k;
+					
+					if (k-1 < 0)
+						k = n-1;
+					else
+						k--;
+				}
+
+				vec1.reverse();
+
+				h = -1;
+				k = i2;
+				
+				while (true)
+				{
+					if (k !== j1)
+						vec2.push(vec[k]);
+					else
+					{
+						// invalid poly
+						if (h < 0 || h >= n)
+							return [];
+
+						if (k === j1 && !cr.b2Separator.isOnSegment(v1["get_x"](), v1["get_y"](), vec[h]["get_x"](), vec[h]["get_y"](), p2["get_x"](), p2["get_y"]()))
+							vec2.push(vec[k]);
+							
+						break;
+					}
+
+					h = k;
+					
+					if (k+1 > n-1)
+						k = 0;
+					else
+						k++;
+				}
+
+				queue.push(vec1, vec2);
+				queue.shift();
+
+				break;
+			}
+		}
+
+		if (isConvex)
+			figsVec.push(queue.shift());
+	}
+
+	return figsVec;
+};
+
+function SplitConvexPolysOver8Points(convexPolys)
+{
+	var ret = [];
+	var i, len, arr;
+	
+	for (i = 0, len = convexPolys.length; i < len; ++i)
+	{
+		arr = convexPolys[i];
+		
+		// <=8 points: can directly use this poly
+		if (arr.length <= 8)
+		{
+			ret.push(arr);
+		}
+		// >8 points: split up
+		else
+		{
+			ret.push.apply(ret, SplitConvexPoly(arr));
+		}
+	}
+	
+	return ret;
+}
+
+function SplitConvexPoly(arr)
+{
+	var poly, nextLast;
+	var ret = [];
+	
+	// At first, take 8 points to make a new poly. For every poly after that, take only 6 more points, and join it to
+	// the first and last points to make a new 8-point poly.
+	ret.push(arr.splice(0, 8));
+	var first = ret[0][0];
+	var last = ret[0][7];
+	
+	while (arr.length)
+	{
+		poly = arr.splice(0, Math.min(arr.length, 6));
+		nextLast = poly[poly.length - 1];
+		poly.push(b2Vec2.Clone(first));
+		poly.push(b2Vec2.Clone(last));
+		ret.push(poly);
+		
+		last = nextLast;
+	}
+	
+	return ret;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+
+;
+;
+
+/////////////////////////////////////
+// Behavior class
+cr.behaviors.Physics = function(runtime)
+{
+	this.runtime = runtime;
+	this.world = new Box2D["b2World"](getTempVec2a(0, 10),	// gravity
+								 	  true);				// allow sleep
+	
+	this.worldG = 10;
+	this.lastUpdateTick = -1;
+	
+	// For registering collisions
+	var listener = new Box2D["JSContactListener"]();
+
+	listener["BeginContact"] = function (contactPtr) {
+		var contact = Box2D["wrapPointer"](contactPtr, Box2D["b2Contact"]);
+		var behA = contact["GetFixtureA"]()["GetBody"]().c2userdata;
+		var behB = contact["GetFixtureB"]()["GetBody"]().c2userdata;
+		runtime.registerCollision(behA.inst, behB.inst);
+	};
+	listener["EndContact"] = function () {};		// unused
+	listener["PreSolve"] = function () {};			// unused
+	listener["PostSolve"] = function () {};			// unused
+
+	this.world["SetContactListener"](listener);
+	
+	// For disabling collisions
+	var filter = new Box2D["JSContactFilter"]();
+	var self = this;
+	
+	filter["ShouldCollide"] = function (fixAPtr, fixBPtr) {
+		if (self.allCollisionsEnabled)
+			return true;
+			
+		var fixtureA = Box2D["wrapPointer"](fixAPtr, Box2D["b2Fixture"]);
+		var fixtureB = Box2D["wrapPointer"](fixBPtr, Box2D["b2Fixture"]);
+			
+		var typeA = fixtureA["GetBody"]().c2userdata.inst.type;
+		var typeB = fixtureB["GetBody"]().c2userdata.inst.type;
+		
+		var s = typeA.extra["Physics_DisabledCollisions"];
+		if (s && s.contains(typeB))
+			return false;
+			
+		s = typeB.extra["Physics_DisabledCollisions"];
+		if (s && s.contains(typeA))
+			return false;
+			
+		return true;
+	};
+	
+	this.world["SetContactFilter"](filter);
+	
+	this.steppingMode = 0;		// fixed
+	this.velocityIterations = 8;
+	this.positionIterations = 3;
+	this.allCollisionsEnabled = true;
+	
+};
+
+(function ()
+{
+	// Import Box2D names
+	var b2BodyDef = Box2D["b2BodyDef"],
+		b2Body = Box2D["b2Body"],
+		b2FixtureDef = Box2D["b2FixtureDef"],
+		b2Fixture = Box2D["b2Fixture"],
+		b2World = Box2D["b2World"],
+		b2PolygonShape = Box2D["b2PolygonShape"],
+		b2CircleShape = Box2D["b2CircleShape"],
+		b2DistanceJointDef = Box2D["b2DistanceJointDef"],
+		b2RevoluteJointDef = Box2D["b2RevoluteJointDef"];
+	
+	// From Tilemap
+	var TILE_FLIPPED_HORIZONTAL = -0x80000000		// note: pretend is a signed int, so negate
+	var TILE_FLIPPED_VERTICAL = 0x40000000
+	var TILE_FLIPPED_DIAGONAL = 0x20000000
+	var TILE_FLAGS_MASK = 0xE0000000
+		
+	// box2D apparently works well with sizes ranging 0.1 to 10 - this means our objects
+	// should work well over a 5 to 500 pixel range.
+	var worldScale = 0.02;
+		  
+	var behaviorProto = cr.behaviors.Physics.prototype;
+		
+	/////////////////////////////////////
+	// Behavior type class
+	behaviorProto.Type = function(behavior, objtype)
+	{
+		this.behavior = behavior;
+		this.objtype = objtype;
+		this.runtime = behavior.runtime;
+	};
+	
+	var behtypeProto = behaviorProto.Type.prototype;
+
+	behtypeProto.onCreate = function()
+	{
+	};
+
+	/////////////////////////////////////
+	// Behavior instance class
+	behaviorProto.Instance = function(type, inst)
+	{
+		this.type = type;
+		this.behavior = type.behavior;
+		this.inst = inst;				// associated object instance to modify
+		this.runtime = type.runtime;
+		this.world = this.behavior.world;
+	};
+	
+	var behinstProto = behaviorProto.Instance.prototype;
+
+	behinstProto.onCreate = function()
+	{
+		// Load properties
+		this.immovable = this.properties[0];
+		this.collisionmask = this.properties[1];
+		this.preventRotation = this.properties[2];
+		this.density = this.properties[3];
+		this.friction = this.properties[4];
+		this.restitution = this.properties[5];
+		this.linearDamping = this.properties[6];
+		this.angularDamping = this.properties[7];
+		this.bullet = this.properties[8];
+		this.enabled = this.properties[9];
+		
+		this.body = null;
+		this.fixture = null;
+		
+		this.inst.update_bbox();
+		this.lastKnownX = this.inst.x;
+		this.lastKnownY = this.inst.y;
+		this.lastKnownAngle = this.inst.angle;
+		this.lastWidth = 0;
+		this.lastHeight = 0;
+		this.lastTickOverride = false;
+		this.recreateBody = false;
+		
+		this.lastAnimation = null;			// for sprites only - will be undefined for other objects
+		this.lastAnimationFrame = -1;		// for sprites only - will be undefined for other objects
+		
+		if (this.myJoints)
+		{
+			cr.clearArray(this.myJoints);
+			cr.clearArray(this.myCreatedJoints);
+			this.joiningMe.clear();
+		}
+		else
+		{
+			this.myJoints = [];						// Created Box2D joints
+			this.myCreatedJoints = [];				// List of actions called to create joints
+			this.joiningMe = new cr.ObjectSet();	// Instances with joints to me
+		}
+		
+		//this.myconvexpolys = null;
+		
+		// Need to know if joint-connected objects get destroyed
+		var self = this;
+		
+		if (!this.recycled)
+		{
+			this.myDestroyCallback = (function(inst) {
+													self.onInstanceDestroyed(inst);
+												});
+		}
+										
+		this.runtime.addDestroyCallback(this.myDestroyCallback);
+	};
+	
+	behinstProto.postCreate = function ()
+	{
+		// Sprite animation frame is now available
+		this.inst.update_bbox();
+		this.createBody();
+		
+		this.lastAnimation = this.inst.cur_animation;
+		this.lastAnimationFrame = this.inst.cur_frame;
+	};
+	
+	behinstProto.onDestroy = function()
+	{
+		this.destroyBody();
+		
+		cr.clearArray(this.myCreatedJoints);	
+		this.joiningMe.clear();
+		
+		this.runtime.removeDestroyCallback(this.myDestroyCallback);
+	};
+	
+	behinstProto.saveToJSON = function ()
+	{
+		var o = {
+			"e": this.enabled,
+			"im": this.immovable,
+			"pr": this.preventRotation,
+			"d": this.density,
+			"fr": this.friction,
+			"re": this.restitution,
+			"ld": this.linearDamping,
+			"ad": this.angularDamping,
+			"b": this.bullet,
+			"mcj": this.myCreatedJoints
+		};
+		
+		if (this.enabled)
+		{
+			var temp = this.body["GetLinearVelocity"]();
+			o["vx"] = temp["get_x"]();
+			o["vy"] = temp["get_y"]();
+			o["om"] = this.body["GetAngularVelocity"]();
+		}
+		
+		return o;
+	};
+	
+	behinstProto.loadFromJSON = function (o)
+	{
+		this.destroyBody();
+		
+		cr.clearArray(this.myCreatedJoints);
+		this.joiningMe.clear();
+		
+		this.enabled = o["e"];
+		this.immovable = o["im"];
+		this.preventRotation = o["pr"];
+		this.density = o["d"];
+		this.friction = o["fr"];
+		this.restitution = o["re"];
+		this.linearDamping = o["ld"];
+		this.angularDamping = o["ad"];
+		this.bullet = o["b"];
+		
+		this.lastKnownX = this.inst.x;
+		this.lastKnownY = this.inst.y;
+		this.lastKnownAngle = this.inst.angle;
+		this.lastWidth = this.inst.width;
+		this.lastHeight = this.inst.height;
+		
+		if (this.enabled)
+		{
+			this.createBody();
+			
+			this.body["SetLinearVelocity"](getTempVec2a(o["vx"], o["vy"]));
+			this.body["SetAngularVelocity"](o["om"]);
+			
+			if (o["vx"] !== 0 || o["vy"] !== 0 || o["om"] !== 0)
+				this.body["SetAwake"](true);
+			
+			this.myCreatedJoints = o["mcj"];
+		}
+	};
+	
+	behinstProto.afterLoad = function ()
+	{
+		if (this.enabled)
+			this.recreateMyJoints();
+	};
+	
+	behinstProto.onInstanceDestroyed = function (inst)
+	{
+		// Remove any joints referencing the destroyed instance
+		var i, len, j, instuid = inst.uid;
+		for (i = 0, j = 0, len = this.myCreatedJoints.length; i < len; i++)
+		{
+			this.myCreatedJoints[j] = this.myCreatedJoints[i];
+			
+			// Sometimes myJoints is empty if this is happening during load. Don't fill it
+			// with undefined values.
+			if (j < this.myJoints.length)
+				this.myJoints[j] = this.myJoints[i];
+			
+			if (this.myCreatedJoints[i].params[1] == instuid)		// attached instance is always 2nd param
+			{
+				if (i < this.myJoints.length)						// myJoints can already be empty in some cases
+					this.world["DestroyJoint"](this.myJoints[i]);
+			}
+			else
+				j++;
+		}
+		
+		// Forget about any instance joining on to me if the joining instance was destroyed
+		this.myCreatedJoints.length = j;
+		
+		if (j < this.myJoints.length)
+			this.myJoints.length = j;
+		
+		this.joiningMe.remove(inst);
+	};
+	
+	behinstProto.destroyMyJoints = function()
+	{
+		var i, len;
+		for (i = 0, len = this.myJoints.length; i < len; i++)
+			this.world["DestroyJoint"](this.myJoints[i]);
+			
+		cr.clearArray(this.myJoints);
+	};
+	
+	behinstProto.recreateMyJoints = function()
+	{
+		var i, len, j;
+		for (i = 0, len = this.myCreatedJoints.length; i < len; i++)
+		{
+			j = this.myCreatedJoints[i];
+			
+			switch (j.type) {
+			case 0:			// distance joint
+				this.doCreateDistanceJoint(j.params[0], j.params[1], j.params[2], j.params[3], j.params[4]);
+				break;
+			case 1:			// revolute joint
+				this.doCreateRevoluteJoint(j.params[0], j.params[1]);
+				break;
+			case 2:			// limited revolute joint
+				this.doCreateLimitedRevoluteJoint(j.params[0], j.params[1], j.params[2], j.params[3]);
+				break;
+			default:
+;
+			}
+		}
+	};
+	
+	behinstProto.destroyBody = function()
+	{
+		if (!this.body)
+			return;
+		
+		// Destroy the body and all joints, which will be recreated later
+		this.destroyMyJoints();
+		
+		if (this.fixture)
+		{
+			this.body["DestroyFixture"](this.fixture);
+			this.fixture = null;
+		}
+		
+		this.world["DestroyBody"](this.body);
+		this.body = null;
+		this.inst.extra.box2dbody = null;
+	};
+	
+	var collrects = [];
+	
+	behinstProto.createBody = function()
+	{
+		if (!this.enabled)
+			return;
+		
+		var inst = this.inst;
+		inst.update_bbox();
+		var i, len, j, lenj, k, lenk, vec, arr, b, tv, c, rc, pts_cache, pts_count, convexpolys, cp, offx, offy, oldAngle;
+		
+		// Create the physics body if we don't have one yet.
+		if (!this.body)
+		{
+			var bodyDef = new b2BodyDef();
+			bodyDef["set_type"](this.immovable ? 0 : 2);		// 0 = b2_staticBody, 2 = b2_dynamicBody
+			
+			// Body expects position to be in center, but the object hotspot may not be centred.
+			// Determine the actual object center.  The easiest way to do this is take its bounding
+			// quad and get its mid point.
+			bodyDef["set_position"](getTempVec2b(inst.bquad.midX() * worldScale, inst.bquad.midY() * worldScale));
+			bodyDef["set_angle"](inst.angle);
+			
+			bodyDef["set_fixedRotation"](this.preventRotation);
+			bodyDef["set_linearDamping"](this.linearDamping);
+			bodyDef["set_angularDamping"](this.angularDamping);
+			bodyDef["set_bullet"](this.bullet);
+			
+			// Create the body - no fixtures attached yet
+			this.body = this.world["CreateBody"](bodyDef);
+			this.body.c2userdata = this;
+			inst.extra.box2dbody = this.body;
+			
+			Box2D["destroy"](bodyDef);
+		}
+		
+		// If we already have a fixture, destroy it. This method is also called to update the fixture on the body, e.g. when an object changes size.
+		if (this.fixture)
+		{
+			this.body["DestroyFixture"](this.fixture);
+			this.fixture = null;
+		}
+		
+		var fixDef = new b2FixtureDef();
+		fixDef["set_density"](this.density);
+		fixDef["set_friction"](this.friction);
+		fixDef["set_restitution"](this.restitution);
+		
+		// If 'use collision poly' set, but no collision poly present, switch to bounding box
+		var hasPoly = this.inst.collision_poly && !this.inst.collision_poly.is_empty();
+		var usecollisionmask = this.collisionmask;
+		
+		if (!hasPoly && !this.inst.tilemap_exists && this.collisionmask === 0)
+			usecollisionmask = 1;
+			
+		// Zero size objects crash Box2D
+		var instw = Math.max(Math.abs(inst.width), 1);
+		var insth = Math.max(Math.abs(inst.height), 1);
+		var ismirrored = inst.width < 0;
+		var isflipped = inst.height < 0;
+		var shape;
+		
+		// use collision poly
+		if (usecollisionmask === 0)
+		{
+			// Is tilemap object: handle separately
+			if (inst.tilemap_exists)
+			{
+				offx = inst.bquad.midX() - inst.x;
+				offy = inst.bquad.midY() - inst.y;
+				inst.getAllCollisionRects(collrects);
+				
+				arr = [];
+				
+				for (i = 0, len = collrects.length; i < len; ++i)
+				{
+					c = collrects[i];
+					rc = c.rc;
+					
+					// Tile has collision polygon
+					if (c.poly)
+					{
+						// Lazily cache in to convexpolys so we don't keep doing the expensive separate work
+						// for every tile in the tilemap
+						if (!c.poly.convexpolys)
+						{
+							pts_cache = c.poly.pts_cache;
+							pts_count = c.poly.pts_count;
+							
+							// convert to array of b2Vec for the separator
+							for (j = 0; j < pts_count; ++j)
+							{
+								arr.push(b2Vec2.Get(pts_cache[j*2], pts_cache[j*2+1]));
+							}
+							
+							// mirrored or flipped: must reverse to keep clockwise points order
+							var flags = (c.id & TILE_FLAGS_MASK);
+							
+							if (flags === TILE_FLIPPED_HORIZONTAL || flags === TILE_FLIPPED_VERTICAL || flags === TILE_FLIPPED_DIAGONAL ||
+								((flags & TILE_FLIPPED_HORIZONTAL) && (flags & TILE_FLIPPED_VERTICAL) && (flags & TILE_FLIPPED_DIAGONAL)))
+							{
+								arr.reverse();
+							}
+							
+							// Run the separator to split to convex polys
+							c.poly.convexpolys = cr.b2Separator.Separate(arr, (rc.right - rc.left) * (rc.bottom - rc.top));
+							
+							for (j = 0, lenj = arr.length; j < lenj; ++j)
+								b2Vec2.Free(arr[j]);
+							
+							cr.clearArray(arr);
+						}
+						
+						// Now we have the tile-relative convex polys in c.poly.convexpolys.
+						// We still need to offset then scale the result.
+						for (j = 0, lenj = c.poly.convexpolys.length; j < lenj; ++j)
+						{
+							cp = c.poly.convexpolys[j];
+;
+							
+							for (k = 0, lenk = cp.length; k < lenk; ++k)
+							{
+								arr.push(b2Vec2.Get((rc.left + cp[k]["get_x"]() - offx) * worldScale, (rc.top + cp[k]["get_y"]() - offy) * worldScale));
+							}
+							
+							shape = createPolygonShape(arr);
+							fixDef["set_shape"](shape);
+							this.fixture = this.body["CreateFixture"](fixDef);
+							
+							Box2D["destroy"](shape);
+							
+							for (k = 0, lenk = arr.length; k < lenk; ++k)
+								b2Vec2.Free(arr[k]);
+							
+							cr.clearArray(arr);
+						}
+					}
+					else
+					{
+						// Bounding box collision for this tile
+						arr.push(b2Vec2.Get((rc.left - offx) * worldScale, (rc.top - offy) * worldScale));
+						arr.push(b2Vec2.Get((rc.right - offx) * worldScale, (rc.top - offy) * worldScale));
+						arr.push(b2Vec2.Get((rc.right - offx) * worldScale, (rc.bottom - offy) * worldScale));
+						arr.push(b2Vec2.Get((rc.left - offx) * worldScale, (rc.bottom - offy) * worldScale));
+					
+						shape = createPolygonShape(arr);
+						fixDef["set_shape"](shape);
+						this.fixture = this.body["CreateFixture"](fixDef);
+						
+						Box2D["destroy"](shape);
+					}
+					
+					for (j = 0, lenj = arr.length; j < lenj; ++j)
+						b2Vec2.Free(arr[j]);
+					
+					cr.clearArray(arr);
+				}
+			}
+			else
+			{
+				// offset of poly from hotspot. poly has to be generated unrotated
+				oldAngle = inst.angle;
+				inst.angle = 0;
+				inst.set_bbox_changed();
+				inst.update_bbox();
+				offx = inst.bquad.midX() - inst.x;
+				offy = inst.bquad.midY() - inst.y;
+				inst.angle = oldAngle;
+				inst.set_bbox_changed();
+				
+				// cache the poly to get vertices at pixel scale relative to object's origin
+				// don't rotate the poly for box2D, it rotates it itself
+				inst.collision_poly.cache_poly(ismirrored ? -instw : instw, isflipped ? -insth : insth, 0);
+				
+				// convert to array of b2Vec for the separator
+				pts_cache = inst.collision_poly.pts_cache;
+				pts_count = inst.collision_poly.pts_count;
+				arr = [];
+				arr.length = pts_count;
+				
+				for (i = 0; i < pts_count; i++)
+				{
+					// offset so the poly is relative to body origin.  Don't scale yet - the separator
+					// works with fractional pixel values, scaling down will throw that off
+					arr[i] = b2Vec2.Get(pts_cache[i*2] - offx, pts_cache[i*2+1] - offy);
+				}
+				
+				if (ismirrored !== isflipped)
+					arr.reverse();		// wrong clockwise order when flipped
+				
+				// Run the separator to split to convex polys
+				convexpolys = cr.b2Separator.Separate(arr, instw * insth);
+				//this.myconvexpolys = convexpolys;
+				
+				for (i = 0; i < pts_count; i++)
+					b2Vec2.Free(arr[i]);
+				
+				if (convexpolys.length)
+				{
+					// Add each convex poly as a fixture
+					for (i = 0, len = convexpolys.length; i < len; i++)
+					{
+						arr = convexpolys[i];
+;
+						
+						// Scale down each poly point
+						for (j = 0, lenj = arr.length; j < lenj; j++)
+						{
+							vec = arr[j];
+							vec["set_x"](vec["get_x"]() * worldScale);
+							vec["set_y"](vec["get_y"]() * worldScale);
+						}
+						
+						shape = createPolygonShape(arr);
+						fixDef["set_shape"](shape);
+						this.fixture = this.body["CreateFixture"](fixDef);
+						
+						Box2D["destroy"](shape);
+						
+						// recycle vec2s
+						for (j = 0, lenj = arr.length; j < lenj; j++)
+							b2Vec2.Free(arr[j]);
+					}
+				}
+				// invalid poly: use bounding box
+				else
+				{
+					shape = new b2PolygonShape();
+					shape["SetAsBox"](instw * worldScale * 0.5, insth * worldScale * 0.5);
+					fixDef["set_shape"](shape);
+					this.fixture = this.body["CreateFixture"](fixDef);
+					Box2D["destroy"](shape);
+				}
+			}
+		}
+		// bounding box
+		else if (usecollisionmask === 1)
+		{
+			shape = new b2PolygonShape();
+			shape["SetAsBox"](instw * worldScale * 0.5, insth * worldScale * 0.5);
+			fixDef["set_shape"](shape);
+			this.fixture = this.body["CreateFixture"](fixDef);
+			Box2D["destroy"](shape);
+		}
+		// circle (2)
+		else
+		{
+			shape = new b2CircleShape();
+			shape["set_m_radius"](Math.min(instw, insth) * worldScale * 0.5);
+			fixDef["set_shape"](shape);
+			this.fixture = this.body["CreateFixture"](fixDef);
+			Box2D["destroy"](shape);
+		}
+		
+		this.lastWidth = inst.width;
+		this.lastHeight = inst.height;
+		
+		Box2D["destroy"](fixDef);
+		
+		cr.clearArray(collrects);
+	};
+
+	// Debug: draw polys
+	/*
+	behinstProto.draw = function (ctx)
+	{
+		if (!this.myconvexpolys)
+			return;
+			
+		this.inst.update_bbox();
+		var midx = this.inst.bquad.midX();
+		var midy = this.inst.bquad.midY();
+		var i, len, j, lenj;
+		
+		var sina = 0;
+		var cosa = 1;
+		
+		if (this.inst.angle !== 0)
+		{
+			sina = Math.sin(this.inst.angle);
+			cosa = Math.cos(this.inst.angle);
+		}
+		
+		var strokeStyles = ["#f00", "#0f0", "#00f", "#ff0", "#0ff", "#f0f"];
+		ctx.lineWidth = 2;
+		
+		var i, len, j, lenj, ax, ay, bx, by, poly, va, vb;
+		for (i = 0, len = this.myconvexpolys.length; i < len; i++)
+		{
+			poly = this.myconvexpolys[i];
+			ctx.strokeStyle = strokeStyles[i];
+			
+			for (j = 0, lenj = poly.length; j < lenj; j++)
+			{
+				va = poly[j];
+				vb = poly[(j + 1) % lenj];
+				
+				ax = va.x / worldScale;
+				ay = va.y / worldScale;
+				bx = vb.x / worldScale;
+				by = vb.y / worldScale;
+				
+				ctx.beginPath();
+				ctx.moveTo(((ax * cosa) - (ay * sina)) + midx, ((ay * cosa) + (ax * sina)) + midy);
+				ctx.lineTo(((bx * cosa) - (by * sina)) + midx, ((by * cosa) + (bx * sina)) + midy);
+				ctx.stroke();
+				ctx.closePath();
+			}
+		}
+	};
+	*/
+	
+	behinstProto.tick = function ()
+	{
+		if (!this.enabled)
+			return;
+		
+		var inst = this.inst;
+		var dt;
+		if (this.behavior.steppingMode === 0)		// fixed
+		{
+			dt = this.runtime.timescale / 60;
+		}
+		else
+		{
+			dt = this.runtime.getDt(this.inst);
+			
+			// Cap step at 30 FPS, otherwise instability can result
+			if (dt > 1 / 30)
+				dt = 1 / 30;
+		}
+		
+		// A new step is necessary.
+		// Don't step at all if the game is paused (timescale is zero).
+		if (this.runtime.tickcount_nosave > this.behavior.lastUpdateTick && this.runtime.timescale > 0)
+		{
+			
+			if (dt !== 0)
+			{
+				this.world["Step"](dt, this.behavior.velocityIterations, this.behavior.positionIterations);		// still apply timescale
+			}
+			
+			this.world["ClearForces"]();
+			
+			
+			this.behavior.lastUpdateTick = this.runtime.tickcount_nosave;
+		}
+		
+		// Size, body, animation frame or tilemap has has changed: recreate body
+		if (this.recreateBody || inst.width !== this.lastWidth || inst.height !== this.lastHeight
+			|| inst.cur_animation !== this.lastAnimation || inst.cur_frame !== this.lastAnimationFrame
+			|| (inst.tilemap_exists && inst.physics_changed))
+		{
+			this.createBody();
+			this.recreateBody = false;
+			this.lastAnimation = inst.cur_animation;
+			this.lastAnimationFrame = inst.cur_frame;
+			
+			if (inst.tilemap_exists && inst.physics_changed)
+				inst.physics_changed = false;
+		}
+		
+		// Something has changed the object (an event or other behavior): update the body
+		var pos_changed = (inst.x !== this.lastKnownX || inst.y !== this.lastKnownY);
+		var angle_changed = (inst.angle !== this.lastKnownAngle);
+		
+		if (pos_changed)
+		{
+			inst.update_bbox();
+			var newmidx = inst.bquad.midX();
+			var newmidy = inst.bquad.midY();
+			var diffx = newmidx - this.lastKnownX;
+			var diffy = newmidy - this.lastKnownY;
+
+			if (angle_changed)
+				this.body["SetTransform"](getTempVec2a(newmidx * worldScale, newmidy * worldScale), inst.angle);
+			else
+				this.body["SetTransform"](getTempVec2a(newmidx * worldScale, newmidy * worldScale), this.body["GetAngle"]());
+			
+			this.body["SetLinearVelocity"](getTempVec2a(diffx, diffy));
+			this.lastTickOverride = true;
+			this.body["SetAwake"](true);
+		}
+		// clean up residual velocity if something else is controlling the object and it has now stopped
+		else if (this.lastTickOverride)
+		{
+			this.lastTickOverride = false;
+			this.body["SetLinearVelocity"](getTempVec2a(0, 0));
+			this.body["SetTransform"](getTempVec2a(inst.bquad.midX() * worldScale, inst.bquad.midY() * worldScale), this.body["GetAngle"]());
+		}
+		
+		if (!pos_changed && angle_changed)
+		{
+			this.body["SetTransform"](this.body["GetPosition"](), inst.angle);
+			this.body["SetAwake"](true);
+		}
+		
+		// Update position and angle of the object from the body
+		var pos = this.body["GetPosition"]();
+		var newx = pos["get_x"]() / worldScale;
+		var newy = pos["get_y"]() / worldScale;
+		var newangle = this.body["GetAngle"]();
+		
+		if (newx !== inst.x || newy !== inst.y || newangle !== inst.angle)
+		{
+			inst.x = newx;
+			inst.y = newy;
+			inst.angle = newangle;
+			inst.set_bbox_changed();
+			
+			// The body position is the midpoint of the object, but the hotspot might not be
+			// at the mid point.  Calculate the new mid-point of the object, and offset the
+			// instance's x and y position by that much.
+			inst.update_bbox();
+			var dx = inst.bquad.midX() - inst.x;
+			var dy = inst.bquad.midY() - inst.y;
+			
+			if (dx !== 0 || dy !== 0)
+			{
+				inst.x -= dx;
+				inst.y -= dy;
+				inst.set_bbox_changed();
+			}
+		}
+		
+		this.lastKnownX = inst.x;
+		this.lastKnownY = inst.y;
+		this.lastKnownAngle = inst.angle;
+	};
+	
+	behinstProto.getInstImgPointX = function(imgpt)
+	{
+		if (imgpt === -1 || !this.inst.getImagePoint)
+			return this.inst.x;
+			
+		// use center of mass instead of origin
+		if (imgpt === 0 && this.body)
+			return (this.body["GetPosition"]()["get_x"]() + this.body["GetLocalCenter"]()["get_x"]()) / worldScale;
+		
+		return this.inst.getImagePoint(imgpt, true);
+	};
+	
+	behinstProto.getInstImgPointY = function(imgpt)
+	{
+		if (imgpt === -1 || !this.inst.getImagePoint)
+			return this.inst.y;
+			
+		// use center of mass instead of origin
+		if (imgpt === 0 && this.body)
+			return (this.body["GetPosition"]()["get_y"]() + this.body["GetLocalCenter"]()["get_y"]()) / worldScale;
+		
+		return this.inst.getImagePoint(imgpt, false);
+	};
+	
+
+	//////////////////////////////////////
+	// Conditions
+	function Cnds() {};
+	
+	Cnds.prototype.IsSleeping = function ()
+	{
+		if (!this.enabled)
+			return false;
+		
+		return !this.body["IsAwake"]();
+	};
+	
+	Cnds.prototype.CompareVelocity = function (which_, cmp_, x_)
+	{
+		if (!this.enabled)
+			return false;
+		
+		var velocity_vec = this.body["GetLinearVelocity"]();
+		var v, vx, vy;
+		
+		if (which_ === 0)		// X velocity
+			v = velocity_vec["get_x"]() / worldScale;
+		else if (which_ === 1)	// Y velocity
+			v = velocity_vec["get_y"]() / worldScale;
+		else					// Overall velocity
+		{
+			vx = velocity_vec["get_x"]() / worldScale;
+			vy = velocity_vec["get_y"]() / worldScale;
+			v = cr.distanceTo(0, 0, vx, vy);
+		}
+		
+		return cr.do_cmp(v, cmp_, x_);
+	};
+	
+	Cnds.prototype.CompareAngularVelocity = function (cmp_, x_)
+	{
+		if (!this.enabled)
+			return false;
+		
+		var av = cr.to_degrees(this.body["GetAngularVelocity"]());
+		return cr.do_cmp(av, cmp_, x_);
+	};
+	
+	Cnds.prototype.CompareMass = function (cmp_, x_)
+	{
+		if (!this.enabled)
+			return false;
+		
+		var mass = this.body["GetMass"]() / worldScale;
+		return cr.do_cmp(mass, cmp_, x_);
+	};
+	
+	Cnds.prototype.IsEnabled = function ()
+	{
+		return this.enabled;
+	};
+	
+	behaviorProto.cnds = new Cnds();
+
+	//////////////////////////////////////
+	// Actions
+	function Acts() {};
+
+	Acts.prototype.ApplyForce = function (fx, fy, imgpt)
+	{
+		if (!this.enabled)
+			return;
+		
+		var x = this.getInstImgPointX(imgpt);
+		var y = this.getInstImgPointY(imgpt);
+		this.body["ApplyForce"](getTempVec2a(fx, fy), getTempVec2b(x * worldScale, y * worldScale), true);
+	};
+	
+	Acts.prototype.ApplyForceToward = function (f, px, py, imgpt)
+	{
+		if (!this.enabled)
+			return;
+		
+		var x = this.getInstImgPointX(imgpt);
+		var y = this.getInstImgPointY(imgpt);
+		var a = cr.angleTo(x, y, px, py);
+		this.body["ApplyForce"](getTempVec2a(Math.cos(a) * f, Math.sin(a) * f), getTempVec2b(x * worldScale, y * worldScale), true);
+	};
+	
+	Acts.prototype.ApplyForceAtAngle = function (f, a, imgpt)
+	{
+		if (!this.enabled)
+			return;
+		
+		a = cr.to_radians(a);
+		var x = this.getInstImgPointX(imgpt);
+		var y = this.getInstImgPointY(imgpt);		
+		this.body["ApplyForce"](getTempVec2a(Math.cos(a) * f, Math.sin(a) * f), getTempVec2b(x * worldScale, y * worldScale), true);
+	};
+	
+	Acts.prototype.ApplyImpulse = function (fx, fy, imgpt)
+	{
+		if (!this.enabled)
+			return;
+		
+		var x = this.getInstImgPointX(imgpt);
+		var y = this.getInstImgPointY(imgpt);
+		this.body["ApplyLinearImpulse"](getTempVec2a(fx, fy), getTempVec2b(x * worldScale, y * worldScale), true);
+		
+		// Disable velocity overrides from using 'set position'
+		this.lastTickOverride = false;
+		this.lastKnownX = this.inst.x;
+		this.lastKnownY = this.inst.y;
+	};
+	
+	Acts.prototype.ApplyImpulseToward = function (f, px, py, imgpt)
+	{
+		if (!this.enabled)
+			return;
+		
+		var x = this.getInstImgPointX(imgpt);
+		var y = this.getInstImgPointY(imgpt);
+		var a = cr.angleTo(x, y, px, py);
+		this.body["ApplyLinearImpulse"](getTempVec2a(Math.cos(a) * f, Math.sin(a) * f), getTempVec2b(x * worldScale, y * worldScale), true);
+		
+		// Disable velocity overrides from using 'set position'
+		this.lastTickOverride = false;
+		this.lastKnownX = this.inst.x;
+		this.lastKnownY = this.inst.y;
+	};
+	
+	Acts.prototype.ApplyImpulseAtAngle = function (f, a, imgpt)
+	{
+		if (!this.enabled)
+			return;
+		
+		a = cr.to_radians(a);
+		var x = this.getInstImgPointX(imgpt);
+		var y = this.getInstImgPointY(imgpt);		
+		this.body["ApplyLinearImpulse"](getTempVec2a(Math.cos(a) * f, Math.sin(a) * f), getTempVec2b(x * worldScale, y * worldScale), true);
+		
+		// Disable velocity overrides from using 'set position'
+		this.lastTickOverride = false;
+		this.lastKnownX = this.inst.x;
+		this.lastKnownY = this.inst.y;
+	};
+	
+	Acts.prototype.ApplyTorque = function (m)
+	{
+		if (!this.enabled)
+			return;
+		
+		this.body["ApplyTorque"](cr.to_radians(m), true);
+	};
+	
+	Acts.prototype.ApplyTorqueToAngle = function (m, a)
+	{
+		if (!this.enabled)
+			return;
+		
+		m = cr.to_radians(m);
+		a = cr.to_radians(a);
+		
+		// instance is clockwise of angle to apply torque toward: apply reverse torque
+		if (cr.angleClockwise(this.inst.angle, a))
+			this.body["ApplyTorque"](-m, true);
+		else
+			this.body["ApplyTorque"](m, true);
+	};
+	
+	Acts.prototype.ApplyTorqueToPosition = function (m, x, y)
+	{
+		if (!this.enabled)
+			return;
+		
+		m = cr.to_radians(m);
+		var a = cr.angleTo(this.inst.x, this.inst.y, x, y);
+		
+		// instance is clockwise of angle to apply torque toward: apply reverse torque
+		if (cr.angleClockwise(this.inst.angle, a))
+			this.body["ApplyTorque"](-m, true);
+		else
+			this.body["ApplyTorque"](m, true);
+	};
+	
+	Acts.prototype.SetAngularVelocity = function (v)
+	{
+		if (!this.enabled)
+			return;
+		
+		this.body["SetAngularVelocity"](cr.to_radians(v));
+		this.body["SetAwake"](true);
+	};
+	
+	Acts.prototype.CreateDistanceJoint = function (imgpt, obj, objimgpt, damping, freq)
+	{
+		if (!obj || !this.enabled)
+			return;
+			
+		var otherinst = obj.getFirstPicked(this.inst);
+		
+		if (!otherinst || otherinst == this.inst)
+			return;
+		if (!otherinst.extra.box2dbody)
+			return;		// no physics behavior on other object
+		
+		this.myCreatedJoints.push({type: 0, params: [imgpt, otherinst.uid, objimgpt, damping, freq]});
+		this.doCreateDistanceJoint(imgpt, otherinst.uid, objimgpt, damping, freq);
+	};
+	
+	behinstProto.doCreateDistanceJoint = function (imgpt, otherinstuid, objimgpt, damping, freq)
+	{
+		if (!this.enabled)
+			return;
+		
+		var otherinst = this.runtime.getObjectByUID(otherinstuid);
+		
+		if (!otherinst || otherinst == this.inst || !otherinst.extra.box2dbody)
+			return;
+			
+		otherinst.extra.box2dbody.c2userdata.joiningMe.add(this.inst);
+		
+		var myx = this.getInstImgPointX(imgpt);
+		var myy = this.getInstImgPointY(imgpt);
+		var theirx, theiry;
+		
+		if (otherinst.getImagePoint)
+		{
+			theirx = otherinst.getImagePoint(objimgpt, true);
+			theiry = otherinst.getImagePoint(objimgpt, false);
+		}
+		else
+		{
+			theirx = otherinst.x;
+			theiry = otherinst.y;
+		}
+		
+		var dx = myx - theirx;
+		var dy = myy - theiry;
+		
+		var jointDef = new b2DistanceJointDef();
+		jointDef["Initialize"](this.body, otherinst.extra.box2dbody, getTempVec2a(myx * worldScale, myy * worldScale), getTempVec2b(theirx * worldScale, theiry * worldScale));
+		jointDef["set_length"](Math.sqrt(dx*dx + dy*dy) * worldScale);
+		jointDef["set_dampingRatio"](damping);
+		jointDef["set_frequencyHz"](freq);
+		this.myJoints.push(this.world["CreateJoint"](jointDef));
+		Box2D["destroy"](jointDef);
+	};
+	
+	Acts.prototype.CreateRevoluteJoint = function (imgpt, obj)
+	{
+		if (!obj || !this.enabled)
+			return;
+			
+		var otherinst = obj.getFirstPicked(this.inst);
+		
+		if (!otherinst || otherinst == this.inst)
+			return;
+		if (!otherinst.extra.box2dbody)
+			return;		// no physics behavior on other object
+		
+		this.myCreatedJoints.push({type: 1, params: [imgpt, otherinst.uid]});
+		this.doCreateRevoluteJoint(imgpt, otherinst.uid);
+	};
+	
+	behinstProto.doCreateRevoluteJoint = function (imgpt, otherinstuid)
+	{
+		if (!this.enabled)
+			return;
+		
+		var otherinst = this.runtime.getObjectByUID(otherinstuid);
+		
+		if (!otherinst || otherinst == this.inst || !otherinst.extra.box2dbody)
+			return;
+			
+		otherinst.extra.box2dbody.c2userdata.joiningMe.add(this.inst);
+		
+		var myx = this.getInstImgPointX(imgpt);
+		var myy = this.getInstImgPointY(imgpt);
+		
+		var jointDef = new b2RevoluteJointDef();
+		jointDef["Initialize"](this.body, otherinst.extra.box2dbody, getTempVec2a(myx * worldScale, myy * worldScale));
+		this.myJoints.push(this.world["CreateJoint"](jointDef));
+		Box2D["destroy"](jointDef);
+	};
+	
+	Acts.prototype.CreateLimitedRevoluteJoint = function (imgpt, obj, lower, upper)
+	{
+		if (!obj || !this.enabled)
+			return;
+			
+		var otherinst = obj.getFirstPicked(this.inst);
+		
+		if (!otherinst || otherinst == this.inst)
+			return;
+		if (!otherinst.extra.box2dbody)
+			return;		// no physics behavior on other object
+		
+		this.myCreatedJoints.push({type: 2, params: [imgpt, otherinst.uid, lower, upper]});
+		this.doCreateLimitedRevoluteJoint(imgpt, otherinst.uid, lower, upper);
+	};
+	
+	behinstProto.doCreateLimitedRevoluteJoint = function (imgpt, otherinstuid, lower, upper)
+	{
+		if (!this.enabled)
+			return;
+		
+		var otherinst = this.runtime.getObjectByUID(otherinstuid);
+		
+		if (!otherinst || otherinst == this.inst || !otherinst.extra.box2dbody)
+			return;
+			
+		otherinst.extra.box2dbody.c2userdata.joiningMe.add(this.inst);
+		
+		var myx = this.getInstImgPointX(imgpt);
+		var myy = this.getInstImgPointY(imgpt);
+		
+		var jointDef = new b2RevoluteJointDef();
+		jointDef["Initialize"](this.body, otherinst.extra.box2dbody, getTempVec2a(myx * worldScale, myy * worldScale));
+		jointDef["set_enableLimit"](true);
+		jointDef["set_lowerAngle"](cr.to_radians(lower));
+		jointDef["set_upperAngle"](cr.to_radians(upper));
+		this.myJoints.push(this.world["CreateJoint"](jointDef));
+		Box2D["destroy"](jointDef);
+	};
+	
+	Acts.prototype.SetWorldGravity = function (g)
+	{
+		if (g === this.behavior.worldG)
+			return;
+		
+		this.world["SetGravity"](getTempVec2a(0, g));
+		this.behavior.worldG = g;
+		
+		// Wake up every physics instance
+		var i, len, arr = this.behavior.my_instances.valuesRef();
+		
+		for (i = 0, len = arr.length; i < len; i++)
+		{
+			if (arr[i].extra.box2dbody)
+				arr[i].extra.box2dbody["SetAwake"](true);
+		}
+	};
+	
+	Acts.prototype.SetSteppingMode = function (mode)
+	{
+		this.behavior.steppingMode = mode;
+	};
+	
+	Acts.prototype.SetIterations = function (vel, pos)
+	{
+		if (vel < 1) vel = 1;
+		if (pos < 1) pos = 1;
+		
+		this.behavior.velocityIterations = vel;
+		this.behavior.positionIterations = pos;
+	};
+	
+	Acts.prototype.SetVelocity = function (vx, vy)
+	{
+		if (!this.enabled)
+			return;
+		
+		this.body["SetLinearVelocity"](getTempVec2a(vx * worldScale, vy * worldScale));
+		this.body["SetAwake"](true);
+		
+		// Disable velocity overrides from using 'set position'
+		this.lastTickOverride = false;
+		this.lastKnownX = this.inst.x;
+		this.lastKnownY = this.inst.y;
+	};
+	
+	Acts.prototype.SetDensity = function (d)
+	{
+		if (!this.enabled)
+			return;
+		
+		if (this.density === d)
+			return;
+			
+		this.density = d;
+		this.fixture["SetDensity"](d);
+		this.body["ResetMassData"]();
+	};
+	
+	Acts.prototype.SetFriction = function (f)
+	{
+		if (!this.enabled)
+			return;
+		
+		if (this.friction === f)
+			return;
+			
+		this.friction = f;
+		this.fixture["SetFriction"](f);
+		
+		// Update friction for all existing contacts
+		// NOTE: looks like a bug in Box2D binding here - GetContactList returns an actual b2ContactEdge, not a list, and
+		// it has to be traversed via get_next().
+		var contactEdge, contact;
+
+		for (contactEdge = this.body["GetContactList"](); Box2D["getPointer"](contactEdge); contactEdge = contactEdge["get_next"]())
+		{
+			var contact = contactEdge["get_contact"]();
+			
+			if (contact)
+				contact["ResetFriction"]();
+		}
+	};
+	
+	Acts.prototype.SetElasticity = function (e)
+	{
+		if (!this.enabled)
+			return;
+		
+		if (this.restitution === e)
+			return;
+			
+		this.restitution = e;
+		this.fixture["SetRestitution"](e);
+	};
+	
+	Acts.prototype.SetLinearDamping = function (ld)
+	{
+		if (!this.enabled)
+			return;
+		
+		if (this.linearDamping === ld)
+			return;
+			
+		this.linearDamping = ld;
+		this.body["SetLinearDamping"](ld);
+	};
+	
+	Acts.prototype.SetAngularDamping = function (ad)
+	{
+		if (!this.enabled)
+			return;
+		
+		if (this.angularDamping === ad)
+			return;
+			
+		this.angularDamping = ad;
+		this.body["SetAngularDamping"](ad);
+	};
+	
+	Acts.prototype.SetImmovable = function (i)
+	{
+		if (!this.enabled)
+			return;
+		
+		if (this.immovable === (i !== 0))
+			return;
+			
+		this.immovable = (i !== 0);
+		this.body["SetType"](this.immovable ? 0 /*b2BodyDef.b2_staticBody*/ : 2 /*b2BodyDef.b2_dynamicBody*/);
+		this.body["SetAwake"](true);
+	};
+	
+	function SetCollisionsEnabled(typeA, typeB, state)
+	{
+		var s;
+		
+		// Enable collisions between A and B
+		if (state)
+		{
+			s = typeA.extra["Physics_DisabledCollisions"];
+			
+			if (s)
+				s.remove(typeB);
+				
+			s = typeB.extra["Physics_DisabledCollisions"];
+			
+			if (s)
+				s.remove(typeA);
+		}
+		// Disable collisions between A and B
+		else
+		{
+			if (!typeA.extra["Physics_DisabledCollisions"])
+				typeA.extra["Physics_DisabledCollisions"] = new cr.ObjectSet();
+				
+			typeA.extra["Physics_DisabledCollisions"].add(typeB);
+			
+			if (!typeB.extra["Physics_DisabledCollisions"])
+				typeB.extra["Physics_DisabledCollisions"] = new cr.ObjectSet();
+				
+			typeB.extra["Physics_DisabledCollisions"].add(typeA);
+		}
+	};
+	
+	Acts.prototype.EnableCollisions = function (obj, state)
+	{
+		if (!obj || !this.enabled)
+			return;
+			
+		var i, len;
+			
+		// If passed a family, set the collisions enabled for the members directly instead of on the family		
+		if (obj.is_family)
+		{
+			for (i = 0, len = obj.members.length; i < len; i++)
+			{
+				SetCollisionsEnabled(this.inst.type, obj.members[i], state !== 0);
+			}
+		}
+		else
+		{
+			SetCollisionsEnabled(this.inst.type, obj, state !== 0);
+		}
+		
+		// Turn off the fast response to ShouldCollide optimisation
+		this.behavior.allCollisionsEnabled = false;
+	};
+	
+	Acts.prototype.SetPreventRotate = function (i)
+	{
+		if (!this.enabled)
+			return;
+		
+		if (this.preventRotation === (i !== 0))
+			return;
+			
+		this.preventRotation = (i !== 0);
+		this.body["SetFixedRotation"](this.preventRotation);
+		this.body["SetAngularVelocity"](0);
+		this.body["SetAwake"](true);
+	};
+	
+	Acts.prototype.SetBullet = function (i)
+	{
+		if (!this.enabled)
+			return;
+		
+		if (this.bullet === (i !== 0))
+			return;
+			
+		this.bullet = (i !== 0);
+		this.body["SetBullet"](this.bullet);
+		this.body["SetAwake"](true);
+	};
+	
+	Acts.prototype.RemoveJoints = function ()
+	{
+		if (!this.enabled)
+			return;
+		
+		this.destroyMyJoints();	
+		cr.clearArray(this.myCreatedJoints);	
+		this.joiningMe.clear();
+	};
+	
+	Acts.prototype.SetEnabled = function (e)
+	{
+		// Is enabled, and setting disabled
+		if (this.enabled && e === 0)
+		{
+			this.destroyBody();
+			this.enabled = false;
+		}
+		// Is disabled, and setting enabled
+		else if (!this.enabled && e === 1)
+		{
+			this.enabled = true;
+			this.createBody();
+		}
+	};
+	
+	behaviorProto.acts = new Acts();
+
+	//////////////////////////////////////
+	// Expressions
+	function Exps() {};
+
+	Exps.prototype.VelocityX = function (ret)
+	{
+		ret.set_float(this.enabled ? this.body["GetLinearVelocity"]()["get_x"]() / worldScale : 0);
+	};
+	
+	Exps.prototype.VelocityY = function (ret)
+	{
+		ret.set_float(this.enabled ? this.body["GetLinearVelocity"]()["get_y"]() / worldScale : 0);
+	};
+	
+	Exps.prototype.AngularVelocity = function (ret)
+	{
+		ret.set_float(this.enabled ? cr.to_degrees(this.body["GetAngularVelocity"]()) : 0);
+	};
+	
+	Exps.prototype.Mass = function (ret)
+	{
+		ret.set_float(this.enabled ? this.body["GetMass"]() / worldScale : 0);
+	};
+	
+	Exps.prototype.CenterOfMassX = function (ret)
+	{
+		ret.set_float(this.enabled ? (this.body["GetPosition"]()["get_x"]() + this.body["GetLocalCenter"]()["get_x"]()) / worldScale : 0);
+	};
+	
+	Exps.prototype.CenterOfMassY = function (ret)
+	{
+		ret.set_float(this.enabled ? (this.body["GetPosition"]()["get_y"]() + this.body["GetLocalCenter"]()["get_y"]()) / worldScale : 0);
+	};
+	
+	Exps.prototype.Density = function (ret)
+	{
+		ret.set_float(this.enabled ? this.density : 0);
+	};
+	
+	Exps.prototype.Friction = function (ret)
+	{
+		ret.set_float(this.enabled ? this.friction : 0);
+	};
+	
+	Exps.prototype.Elasticity = function (ret)
+	{
+		ret.set_float(this.enabled ? this.restitution : 0);
+	};
+	
+	Exps.prototype.LinearDamping = function (ret)
+	{
+		ret.set_float(this.enabled ? this.linearDamping : 0);
+	};
+	
+	Exps.prototype.AngularDamping = function (ret)
+	{
+		ret.set_float(this.enabled ? this.angularDamping : 0);
+	};
+	
+	behaviorProto.exps = new Exps();
+	
+}());
+
 cr.getObjectRefTable = function () {
 	return [
 		cr.plugins_.TiledBg,
@@ -32159,9 +34747,28 @@ cr.getObjectRefTable = function () {
 		cr.plugins_.Keyboard,
 		cr.plugins_.Text,
 		cr.plugins_.Audio,
+		cr.plugins_.sliderbar,
+		cr.behaviors.destroy,
+		cr.behaviors.Physics,
+		cr.plugins_.Button,
 		cr.system_object.prototype.cnds.OnLayoutStart,
+		cr.plugins_.Audio.prototype.acts.Preload,
+		cr.plugins_.Button.prototype.cnds.OnClicked,
+		cr.system_object.prototype.acts.GoToLayout,
+		cr.system_object.prototype.acts.SetVar,
+		cr.behaviors.Platform.prototype.acts.SetEnabled,
+		cr.plugins_.sliderbar.prototype.acts.SetVisible,
 		cr.behaviors.Bullet.prototype.acts.SetAngleOfMotion,
 		cr.plugins_.Audio.prototype.acts.Play,
+		cr.plugins_.sliderbar.prototype.exps.Value,
+		cr.plugins_.Sprite.prototype.acts.StopAnim,
+		cr.plugins_.sliderbar.prototype.cnds.OnChanged,
+		cr.plugins_.Audio.prototype.acts.SetVolume,
+		cr.plugins_.Touch.prototype.cnds.OnTapGestureObject,
+		cr.plugins_.Sprite.prototype.acts.SetAnimFrame,
+		cr.plugins_.Sprite.prototype.exps.AnimationFrame,
+		cr.plugins_.Sprite.prototype.cnds.CompareFrame,
+		cr.plugins_.Audio.prototype.acts.SetMuted,
 		cr.plugins_.TiledBg.prototype.cnds.CompareX,
 		cr.plugins_.TiledBg.prototype.exps.Width,
 		cr.plugins_.TiledBg.prototype.acts.SetX,
@@ -32179,13 +34786,12 @@ cr.getObjectRefTable = function () {
 		cr.system_object.prototype.cnds.CompareVar,
 		cr.system_object.prototype.acts.SubVar,
 		cr.system_object.prototype.acts.CreateObject,
-		cr.plugins_.TiledBg.prototype.acts.SetSize,
+		cr.system_object.prototype.exps.layoutheight,
 		cr.system_object.prototype.exps.random,
+		cr.plugins_.TiledBg.prototype.acts.SetSize,
 		cr.plugins_.TiledBg.prototype.acts.SetPos,
 		cr.system_object.prototype.exps.layoutwidth,
-		cr.system_object.prototype.exps.layoutheight,
 		cr.plugins_.TiledBg.prototype.exps.Height,
-		cr.system_object.prototype.acts.SetVar,
 		cr.plugins_.TiledBg.prototype.acts.Destroy,
 		cr.plugins_.Sprite.prototype.cnds.CompareY,
 		cr.system_object.prototype.acts.ResetGlobals,
@@ -32193,7 +34799,12 @@ cr.getObjectRefTable = function () {
 		cr.plugins_.Sprite.prototype.cnds.CompareX,
 		cr.plugins_.Sprite.prototype.acts.SetX,
 		cr.plugins_.Sprite.prototype.exps.X,
-		cr.behaviors.Platform.prototype.cnds.OnLand
+		cr.behaviors.Platform.prototype.cnds.OnLand,
+		cr.plugins_.Sprite.prototype.acts.SetAnim,
+		cr.plugins_.Button.prototype.acts.SetVisible,
+		cr.plugins_.Audio.prototype.acts.Stop,
+		cr.system_object.prototype.acts.Wait,
+		cr.plugins_.Text.prototype.acts.SetVisible
 	];
 };
 
